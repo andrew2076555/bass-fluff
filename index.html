@@ -212,6 +212,11 @@ function getBeatPulse() {
 async function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
+  // iOS/mobile requires explicit resume on user gesture
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume();
+  }
+
   masterFilter = audioCtx.createBiquadFilter();
   masterFilter.type = 'lowpass';
   masterFilter.frequency.value = 800;
@@ -246,6 +251,13 @@ async function initAudio() {
   });
 
   audioStartTime = audioCtx.currentTime;
+
+  // Handle audio context interruptions (tab switch, phone call, etc.)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  });
 }
 
 function activateStem(index) {
@@ -1134,17 +1146,25 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
-canvas.addEventListener('click', async () => {
+async function handleStart() {
   if (gameState === 'title') {
-    gameState = 'loading'; await initAudio(); resetGame(); gameState = 'countdown';
+    gameState = 'loading';
+    await initAudio();
+    resetGame();
+    gameState = 'countdown';
   } else if (gameState === 'gameover') {
-    resetGame(); stems.forEach((s, i) => { stemGains[i].gain.value = 0; }); gameState = 'countdown';
+    if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+    resetGame();
+    stems.forEach((s, i) => { stemGains[i].gain.value = 0; });
+    gameState = 'countdown';
   }
-});
+}
+
+canvas.addEventListener('click', handleStart);
 
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  if (gameState === 'title' || gameState === 'gameover') { canvas.dispatchEvent(new Event('click')); return; }
+  if (gameState === 'title' || gameState === 'gameover') { handleStart(); return; }
   for (const touch of e.touches) { if (touch.clientX < window.innerWidth / 2) touchLeft = true; else touchRight = true; }
 }, { passive: false });
 
